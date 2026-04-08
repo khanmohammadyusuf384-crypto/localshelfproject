@@ -1,0 +1,10 @@
+.venv/
+.hf-cache/
+.tmp/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+chroma_db/
+

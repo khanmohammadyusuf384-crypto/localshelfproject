@@ -1,0 +1,10 @@
+chromadb
+gradio
+kagglehub
+langchain-chroma
+langchain-community
+langchain-text-splitters
+numpy
+pandas
+sentence-transformers
+transformers
