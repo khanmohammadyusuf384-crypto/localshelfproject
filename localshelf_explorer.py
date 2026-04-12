@@ -76,6 +76,19 @@ def truncate_description(description: str, word_limit: int = 32) -> str:
     return " ".join(words[:word_limit]) + "..."
 
 
+def extract_isbn_from_page_content(page_content: str) -> int | None:
+    """Safely extract the leading ISBN from a vector-store document."""
+    text = str(page_content).strip().strip('"')
+    if not text:
+        return None
+    
+    first_token = text.split()[0]
+    try:
+        return int(first_token)
+    except (TypeError, ValueError):
+        return None
+
+
 def apply_filters(
     book_recs: pd.DataFrame,
     category: str,
@@ -128,13 +141,19 @@ def retrieve_recommendations(
 
     if query:
         recs = db_books.similarity_search(query, k=60)
-        # Each vector-store document starts with the ISBN, so we can map semantic
-        # search results back to the full book rows in the original dataframe.
-        ordered_isbns = [int(rec.page_content.strip('"').split()[0]) for rec in recs]
+        # Each vector-store document starts with the ISBN, so we try to recover it
+        # safely and ignore malformed results instead of crashing the app.
+        ordered_isbns = []
+        for rec in recs:
+            isbn = extract_isbn_from_page_content(rec.page_content)
+            if isbn is not None and isbn not in ordered_isbns:
+                ordered_isbns.append(isbn)
+
         # `set_index(...).reindex(...)` is a handy pandas pattern when you want rows
         # back in a specific custom order rather than the dataframe's default order.
         book_recs = books.set_index("isbn13").reindex(ordered_isbns).dropna(subset=["title"]).reset_index()
         mode = f"Semantic match for: `{query}`"
+ 
     else:
         book_recs = books.copy()
         mode = "Browse mode: no query provided, showing books from your local catalog"
