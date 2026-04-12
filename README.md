@@ -1,12 +1,13 @@
 # LocalShelf Explorer
 
-LocalShelf Explorer is a local-first book discovery app built around semantic search, lightweight mood filtering, and a small offline-friendly recommendation workflow. The project turns a catalog of books into a searchable shelf that can answer natural-language prompts such as:
+LocalShelf Explorer is a local-first book discovery app that helps users find books with natural-language search, lightweight mood filtering, and offline-friendly recommendations. It uses local embeddings, a persistent Chroma vector database, and free Hugging Face models so the core recommendation flow can run on a personal laptop without paid APIs. Instead of relying only on keyword search, the app lets users describe what they want to read in plain language, such as "a tense historical mystery" or "a medieval China-inspired kingdom-building story", and then returns relevant matches from a prepared local catalog.
 
-* "a thoughtful story about forgiveness"
-* "a suspenseful historical mystery"
-* "a short, highly rated nonfiction read"
+## Why this project matters
 
-The project is designed to work on a personal laptop with no paid API usage. Once the local data and free Hugging Face models are prepared, the app can run without an internet connection for its core recommendation flow.
+This project is a small but practical example of local AI applied to a real user problem: content discovery. It shows how semantic retrieval, lightweight ML enrichment, and local-first design can work together in a usable product.
+
+The same pattern can be extended beyond books to other discovery workflows such as ecommerce catalogs, learning resources, internal knowledge bases, or media recommendation systems.
+
 
 ## Key features
 
@@ -27,6 +28,17 @@ The Gradio app is shaped as a browsing tool. It includes:
 * minimum-rating filtering
 * multiple sort modes
 * card-style recommendations with metadata summaries
+
+## Tech stack
+
+* Python
+* Gradio
+* Pandas
+* NumPy
+* Chroma vector database
+* Sentence Transformers
+* Hugging Face Transformers
+
 
 ## Project layout
 
@@ -56,6 +68,8 @@ Supporting files:
 
 ## How it works
 
+The project follows a small local retrieval pipeline:
+
 1. A source book dataset is loaded or reused locally.
 2. The dataset is cleaned and reduced to books with enough descriptive text.
 3. A simple category mapping is added to support shelf-style filtering.
@@ -74,15 +88,17 @@ python build_localshelf_catalog.py
 python localshelf_explorer.py
 ```
 
-If the embedding model has not been cached yet, the first setup may download the free model:
+What these commands do:
 
-* `sentence-transformers/all-MiniLM-L6-v2`
+1. Install the local dependencies needed by the app and preprocessing pipeline.
+2. Prepare the cleaned dataset, emotion scores, tagged descriptions, and vector database.
+3. Launch the Gradio interface locally.
 
-After the model has been downloaded once, it is stored in `.hf-cache/` and reused locally.
+After startup, the app runs on a local Gradio server in your browser.
 
 ## Offline behavior
 
-The core recommendation pipeline can run offline after setup is complete:
+After the required model files have been downloaded and cached once, the core recommendation workflow can run offline.
 
 * local model loading
 * local semantic search
@@ -121,6 +137,11 @@ Each result card shows:
 * The local embedding loader is configured to prefer cached files and offline startup.
 * If you delete `.hf-cache/` or `chroma_db/`, those resources will need to be rebuilt.
 
+## Portfolio value
+
+LocalShelf Explorer demonstrates practical skills in data preparation, semantic retrieval, offline-friendly ML workflows, vector search, and user-focused interface design. It is positioned not just as a demo app, but as a foundation for real-world recommendation and discovery systems.
+
+
 ## Future improvements
 
 Some natural next steps for this project:
@@ -130,3 +151,5 @@ Some natural next steps for this project:
 * add author or publication-year filters
 * surface similarity scores in the UI
 * package the app into a cleaner desktop-friendly launcher
+* evaluate recommendation quality with sample queries and expected results
+
