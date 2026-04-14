@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 import gradio as gr
 import numpy as np
@@ -76,6 +77,29 @@ def truncate_description(description: str, word_limit: int = 32) -> str:
     return " ".join(words[:word_limit]) + "..."
 
 
+def preprocess_query(query: str) -> str:
+    """Normalize natural-language input before semantic search."""
+    filler_words = {
+        "a",
+        "an",
+        "the",
+        "about",
+    }
+    normalized = str(query).lower().strip()
+    if not normalized:
+        return ""
+
+    # Keep only word-like tokens so punctuation doesn't leak into embeddings.
+    tokens = re.findall(r"\b[\w']+\b", normalized)
+    filtered_tokens = [token for token in tokens if token not in filler_words]
+
+    cleaned = " ".join(filtered_tokens).strip()
+    # Guard against very short inputs after cleanup (for example: "a", "the").
+    if len(cleaned) < 2:
+        return ""
+    return cleaned
+
+
 def extract_isbn_from_page_content(page_content: str) -> int | None:
     """Safely extract the leading ISBN from a vector-store document."""
     text = str(page_content).strip().strip('"')
@@ -137,7 +161,7 @@ def retrieve_recommendations(
 ) -> tuple[pd.DataFrame, str]:
     """Get book recommendations from semantic search or browse mode."""
     # This return type means: the function gives back `(dataframe, message_text)`.
-    query = query.strip()
+    query = preprocess_query(query)
 
     if query:
         recs = db_books.similarity_search(query, k=60)
