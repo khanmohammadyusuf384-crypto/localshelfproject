@@ -100,6 +100,43 @@ def preprocess_query(query: str) -> str:
     return cleaned
 
 
+def parse_query_structure(clean_query: str) -> dict[str, list[str]]:
+    """Split a cleaned query into core keywords and descriptive modifiers."""
+    modifier_terms = {
+        "hopeful",
+        "tense",
+        "short",
+        "long",
+        "dark",
+        "light",
+        "funny",
+        "serious",
+        "cozy",
+        "gritty",
+        "slow",
+        "fast",
+        "uplifting",
+        "sad",
+        "happy",
+        "suspenseful",
+        "romantic",
+    }
+
+    tokens = str(clean_query).split()
+    if not tokens:
+        return {"keywords": [], "modifiers": []}
+
+    modifiers = [token for token in tokens if token in modifier_terms]
+    keywords = [token for token in tokens if token not in modifier_terms]
+
+    # Keep at least one keyword if a user only typed descriptive language.
+    if not keywords and modifiers:
+        keywords = [modifiers[-1]]
+        modifiers = modifiers[:-1]
+
+    return {"keywords": keywords, "modifiers": modifiers}
+
+
 def extract_isbn_from_page_content(page_content: str) -> int | None:
     """Safely extract the leading ISBN from a vector-store document."""
     text = str(page_content).strip().strip('"')
@@ -162,6 +199,7 @@ def retrieve_recommendations(
     """Get book recommendations from semantic search or browse mode."""
     # This return type means: the function gives back `(dataframe, message_text)`.
     query = preprocess_query(query)
+    parsed_query = parse_query_structure(query)
 
     if query:
         recs = db_books.similarity_search(query, k=60)
@@ -176,7 +214,10 @@ def retrieve_recommendations(
         # `set_index(...).reindex(...)` is a handy pandas pattern when you want rows
         # back in a specific custom order rather than the dataframe's default order.
         book_recs = books.set_index("isbn13").reindex(ordered_isbns).dropna(subset=["title"]).reset_index()
-        mode = f"Semantic match for: `{query}`"
+        mode = (
+            f"Semantic match for: `{query}` "
+            f"(keywords: {parsed_query['keywords']}, modifiers: {parsed_query['modifiers']})"
+        )
  
     else:
         book_recs = books.copy()
