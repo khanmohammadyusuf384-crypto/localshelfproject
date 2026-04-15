@@ -188,6 +188,54 @@ def apply_filters(
     return filtered
 
 
+def rerank_with_composite_score(
+    book_recs: pd.DataFrame,
+    ordered_isbns: list[int],
+    query_keywords: list[str],
+) -> pd.DataFrame:
+    """Blend semantic rank with simple keyword boosts and sort by final score."""
+    reranked = book_recs.copy()
+    if reranked.empty:
+        reranked["semantic_score"] = []
+        reranked["keyword_boost"] = []
+        reranked["final_score"] = []
+        return reranked
+
+    # We do not receive raw vector distances from `similarity_search`, so we
+    # convert implicit retrieval order into a normalized semantic score.
+    isbn_to_rank = {isbn: rank for rank, isbn in enumerate(ordered_isbns)}
+    total = max(len(ordered_isbns), 1)
+
+    def semantic_score_for(isbn: int) -> float:
+        rank = isbn_to_rank.get(isbn, total)
+        return max(0.0, 1.0 - (rank / total))
+
+    reranked["semantic_score"] = reranked["isbn13"].map(semantic_score_for).astype(float)
+
+    query_terms = [str(term).lower() for term in query_keywords if str(term).strip()]
+
+    def keyword_boost_for(row: pd.Series) -> float:
+        if not query_terms:
+            return 0.0
+
+        title_text = str(row.get("title_and_subtitle") or row.get("title") or "").lower()
+        description_text = str(row.get("description") or "").lower()
+
+        title_matches = sum(1 for term in query_terms if term in title_text)
+        description_matches = sum(1 for term in query_terms if term in description_text)
+
+        # Title matches are stronger than description matches by design.
+        return (title_matches * 0.35) + (description_matches * 0.12)
+
+    reranked["keyword_boost"] = reranked.apply(keyword_boost_for, axis=1)
+    reranked["final_score"] = reranked["semantic_score"] + reranked["keyword_boost"]
+
+    return reranked.sort_values(
+        by=["final_score", "average_rating", "ratings_count"],
+        ascending=[False, False, False],
+    )
+
+
 def retrieve_recommendations(
     query: str,
     category: str,
@@ -214,6 +262,11 @@ def retrieve_recommendations(
         # `set_index(...).reindex(...)` is a handy pandas pattern when you want rows
         # back in a specific custom order rather than the dataframe's default order.
         book_recs = books.set_index("isbn13").reindex(ordered_isbns).dropna(subset=["title"]).reset_index()
+        book_recs = rerank_with_composite_score(
+            book_recs=book_recs,
+            ordered_isbns=ordered_isbns,
+            query_keywords=parsed_query["keywords"],
+        )
         mode = (
             f"Semantic match for: `{query}` "
             f"(keywords: {parsed_query['keywords']}, modifiers: {parsed_query['modifiers']})"
