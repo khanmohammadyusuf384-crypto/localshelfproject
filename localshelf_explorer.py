@@ -192,9 +192,17 @@ def rerank_with_composite_score(
     book_recs: pd.DataFrame,
     ordered_isbns: list[int],
     query_keywords: list[str],
+    query_modifiers: list[str],
 ) -> pd.DataFrame:
     """Blend semantic rank with simple keyword boosts and sort by final score."""
     reranked = book_recs.copy()
+    modifier_map = {
+        "sad": ["tragic", "grief", "loss", "dark"],
+        "hopeful": ["uplifting", "inspiring", "positive"],
+        "tense": ["dark", "thrilling", "suspense", "intense"],
+        "romantic": ["love", "relationship", "passion"],
+        "funny": ["humor", "comedy", "lighthearted"],
+    }
     if reranked.empty:
         reranked["semantic_score"] = []
         reranked["keyword_boost"] = []
@@ -227,8 +235,33 @@ def rerank_with_composite_score(
         # Title matches are stronger than description matches by design.
         return (title_matches * 0.35) + (description_matches * 0.12)
 
+    def modifier_boost_for(row: pd.Series) -> float:
+        if not query_modifiers:
+            return 0.0
+
+    text = (
+        str(row.get("title_and_subtitle") or row.get("title") or "") + " " +
+        str(row.get("description") or "")
+    ).lower()
+
+    boost = 0.0
+
+    for modifier in query_modifiers:
+        related_terms = modifier_map.get(modifier, [])
+        matches = sum(1 for term in related_terms if term in text)
+
+        # smaller weight than keyword boost (important)
+        boost += matches * 0.08
+
+    return boost
+
     reranked["keyword_boost"] = reranked.apply(keyword_boost_for, axis=1)
-    reranked["final_score"] = reranked["semantic_score"] + reranked["keyword_boost"]
+    reranked["modifier_boost"] = reranked.apply(modifier_boost_for, axis=1)
+    reranked["final_score"] = (
+    reranked["semantic_score"]
+    + reranked["keyword_boost"]
+    + reranked["modifier_boost"]
+)
 
     return reranked.sort_values(
         by=["final_score", "average_rating", "ratings_count"],
@@ -266,6 +299,7 @@ def retrieve_recommendations(
             book_recs=book_recs,
             ordered_isbns=ordered_isbns,
             query_keywords=parsed_query["keywords"],
+            query_modifiers=parsed_query["modifiers"],
         )
         mode = (
             f"Semantic match for: `{query}` "
