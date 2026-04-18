@@ -239,21 +239,21 @@ def rerank_with_composite_score(
         if not query_modifiers:
             return 0.0
 
-    text = (
+        text = (
         str(row.get("title_and_subtitle") or row.get("title") or "") + " " +
         str(row.get("description") or "")
-    ).lower()
+        ).lower()
 
-    boost = 0.0
+        boost = 0.0
 
-    for modifier in query_modifiers:
-        related_terms = modifier_map.get(modifier, [])
-        matches = sum(1 for term in related_terms if term in text)
+        for modifier in query_modifiers:
+            related_terms = modifier_map.get(modifier, [])
+            matches = sum(1 for term in related_terms if term in text)
 
-        # smaller weight than keyword boost (important)
-        boost += matches * 0.08
+            # smaller weight than keyword boost (important)
+            boost += matches * 0.08
 
-    return boost
+        return boost
 
     reranked["keyword_boost"] = reranked.apply(keyword_boost_for, axis=1)
     reranked["modifier_boost"] = reranked.apply(modifier_boost_for, axis=1)
