@@ -156,6 +156,9 @@ def apply_filters(
     tone: str,
     min_rating: float,
     sort_by: str,
+    author: str,
+    year_min: int,
+    year_max: int,
 ) -> pd.DataFrame:
     """Apply the dropdown and slider choices to the recommended books."""
     filtered = book_recs.copy()
@@ -164,6 +167,17 @@ def apply_filters(
         filtered = filtered[filtered["simple_categories"] == category]
 
     filtered = filtered[filtered["average_rating"] >= min_rating]
+
+    if author:
+        filtered = filtered[
+            filtered["authors"].str.lower().str.contains(author.lower(), na=False)
+        ]
+
+    filtered = filtered[
+        (filtered["published_year"] != 0) &
+        (filtered["published_year"] >= year_min) & 
+        (filtered["published_year"] <= year_max)
+    ]
 
     # Tone sorting is intentionally a ranking step, not a hard filter. We still
     # show all matching books, but mood-aligned ones rise to the top first.
@@ -276,6 +290,9 @@ def retrieve_recommendations(
     min_rating: float,
     sort_by: str,
     max_results: int,
+    author: str,
+    year_min: int,
+    year_max: int,
 ) -> tuple[pd.DataFrame, str]:
     """Get book recommendations from semantic search or browse mode."""
     # This return type means: the function gives back `(dataframe, message_text)`.
@@ -310,11 +327,11 @@ def retrieve_recommendations(
         book_recs = books.copy()
         mode = "Browse mode: no query provided, showing books from your local catalog"
 
-    filtered = apply_filters(book_recs, category, tone, min_rating, sort_by)
+    filtered = apply_filters(book_recs, category, tone, min_rating, sort_by, author, year_min, year_max)
     return filtered.head(max_results), mode
 
 
-def build_summary(recommendations: pd.DataFrame, mode: str, category: str, tone: str, sort_by: str) -> str:
+def build_summary(recommendations: pd.DataFrame, mode: str, category: str, tone: str, sort_by: str, min_rating: float, author: str, year_min: int, year_max: int) -> str:
     """Build the markdown summary shown above the result cards."""
     if recommendations.empty:
         return (
@@ -335,7 +352,9 @@ def build_summary(recommendations: pd.DataFrame, mode: str, category: str, tone:
         f"- Tone filter: {tone}\n"
         f"- Sort mode: {sort_by}\n"
         f"- Average rating in results: {avg_rating:.2f}\n"
-        f"- Publication span: {oldest} to {newest}"
+        f"- Publication span: {oldest} to {newest}\n"
+        f"- Author filter: {author or 'Any'}\n"
+        f"- Year range: {year_min} to {year_max}\n"
     )
 
 
@@ -390,6 +409,9 @@ def recommend_books(
     min_rating: float,
     sort_by: str,
     max_results: int,
+    author: str,
+    year_min: int,
+    year_max: int,
 ):
     """Main callback used by the Explore button in the UI."""
     recommendations, mode = retrieve_recommendations(
@@ -399,8 +421,11 @@ def recommend_books(
         min_rating=min_rating,
         sort_by=sort_by,
         max_results=max_results,
+        author=author,
+        year_min=year_min,
+        year_max=year_max,
     )
-    summary = build_summary(recommendations, mode, category, tone, sort_by)
+    summary = build_summary(recommendations, mode, category, tone, sort_by, min_rating, author, year_min, year_max)
     cards = build_book_cards(recommendations)
     return summary, cards
 
@@ -428,6 +453,27 @@ with gr.Blocks(theme=gr.themes.Soft()) as dashboard:
         category_dropdown = gr.Dropdown(choices=categories, label="Shelf", value="All")
         tone_dropdown = gr.Dropdown(choices=tones, label="Mood", value="All")
         min_rating = gr.Slider(minimum=0.0, maximum=5.0, value=3.5, step=0.1, label="Minimum rating")
+    
+    author_input = gr.Textbox(
+        label="Author (optional)", 
+        placeholder="e.g. J.K. Rowling"
+    )
+
+    year_min = gr.Slider(
+        minimum=1900,
+        maximum=2025,
+        value=1950,
+        step=1,
+        label="Publication After",
+    )
+
+    year_max = gr.Slider(
+        minimum=1900,
+        maximum=2025,
+        value=2020,
+        step=1,
+        label="Publication Before",
+    )
 
     with gr.Row():
         sort_dropdown = gr.Dropdown(choices=sort_modes, label="Sort results", value="Semantic Match")
@@ -441,7 +487,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as dashboard:
         # Gradio calls this function with the widget values in the same order
         # as the `inputs=[...]` list, then sends the returned values to `outputs=[...]`.
         fn=recommend_books,
-        inputs=[user_query, category_dropdown, tone_dropdown, min_rating, sort_dropdown, max_results],
+        inputs=[user_query, category_dropdown, tone_dropdown, min_rating, sort_dropdown, max_results, author_input, year_min, year_max],
         outputs=[summary_output, cards_output],
     )
 
