@@ -353,8 +353,8 @@ def build_summary(recommendations: pd.DataFrame, mode: str, category: str, tone:
         f"- Sort mode: {sort_by}\n"
         f"- Average rating in results: {avg_rating:.2f}\n"
         f"- Publication span: {oldest} to {newest}\n"
-        f"- Author filter: {author or 'Any'}\n"
-        f"- Year range: {year_min} to {year_max}\n"
+        f"- Author: {author if author else 'Any'}\n"
+        f"- Year range: {year_min} -> {year_max}\n"
     )
 
 
@@ -414,6 +414,8 @@ def recommend_books(
     year_max: int,
 ):
     """Main callback used by the Explore button in the UI."""
+    if year_min > year_max:
+        year_min, year_max = year_max, year_min   
     recommendations, mode = retrieve_recommendations(
         query=query,
         category=category,
@@ -434,7 +436,7 @@ categories = ["All"] + sorted(books["simple_categories"].fillna("Uncategorized")
 tones = ["All", "Happy", "Surprising", "Angry", "Suspenseful", "Sad"]
 sort_modes = ["Semantic Match", "Highest Rated", "Newest First", "Shortest Reads"]
 
-with gr.Blocks(theme=gr.themes.Soft()) as dashboard:
+with gr.Blocks() as dashboard:
     gr.Markdown(
         """
         # LocalShelf Explorer
@@ -459,20 +461,23 @@ with gr.Blocks(theme=gr.themes.Soft()) as dashboard:
         placeholder="e.g. J.K. Rowling"
     )
 
+    year_min_value = int(books["published_year"].replace(0, np.nan).min())
+    year_max_value = int(books["published_year"].max())
+
     year_min = gr.Slider(
-        minimum=1900,
-        maximum=2025,
-        value=1950,
+        minimum=year_min_value,
+        maximum=year_max_value,
+        value=year_min_value,
         step=1,
-        label="Publication After",
+        label="Published Year (From)",
     )
 
     year_max = gr.Slider(
-        minimum=1900,
-        maximum=2025,
-        value=2020,
+        minimum=year_min_value,
+        maximum=year_max_value,
+        value=year_max_value,
         step=1,
-        label="Publication Before",
+        label="Published Year (To)",
     )
 
     with gr.Row():
@@ -493,4 +498,4 @@ with gr.Blocks(theme=gr.themes.Soft()) as dashboard:
 
 
 if __name__ == "__main__":
-    dashboard.launch()
+    dashboard.launch(theme=gr.themes.Soft())
