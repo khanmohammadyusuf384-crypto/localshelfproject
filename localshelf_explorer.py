@@ -37,6 +37,7 @@ def require_project_data() -> None:
 require_project_data()
 
 books = pd.read_csv(BOOKS_WITH_EMOTIONS_PATH)
+saved_books = set()
 # Remote thumbnails from the source dataset can be small, so we request a larger
 # variant when a cover URL exists and fall back to a local placeholder otherwise.
 books["large_thumbnail"] = books["thumbnail"].fillna("") + "&fife=w800"
@@ -394,6 +395,9 @@ def build_book_cards(recommendations: pd.DataFrame) -> str:
                         <span style="background:#f7efe1; padding:4px 10px; border-radius:999px;">{year_text}</span>
                         <span style="background:#f3e8ef; padding:4px 10px; border-radius:999px;">{pages_text}</span>
                     </div>
+                    <div style="margin-top:10px;">
+                        <span style="font-size:0.8rem; color:#666;">ISBN: {row["isbn13"]}</span>
+                    </div>
                 </div>
             </div>
             """
@@ -430,6 +434,17 @@ def recommend_books(
     summary = build_summary(recommendations, mode, category, tone, sort_by, min_rating, author, year_min, year_max)
     cards = build_book_cards(recommendations)
     return summary, cards
+
+def save_book(isbn: int):
+    saved_books.add(isbn)
+    return f"Saved book {isbn}"
+
+def get_saved_books():
+    if not saved_books:
+        return "No saved books yet."
+
+    saved_df = books[books["isbn13"].isin(saved_books)]
+    return build_book_cards(saved_df)
 
 # These lists are built once from the dataset and then reused by the Gradio widgets.
 categories = ["All"] + sorted(books["simple_categories"].fillna("Uncategorized").unique())
@@ -485,8 +500,11 @@ with gr.Blocks() as dashboard:
         max_results = gr.Slider(minimum=4, maximum=20, value=8, step=2, label="How many books to show")
         submit_button = gr.Button("Explore books", variant="primary")
 
+    show_saved_btn = gr.Button("Show Saved Books")
+
     summary_output = gr.Markdown()
     cards_output = gr.HTML()
+    saved_output = gr.HTML()
 
     submit_button.click(
         # Gradio calls this function with the widget values in the same order
@@ -494,6 +512,12 @@ with gr.Blocks() as dashboard:
         fn=recommend_books,
         inputs=[user_query, category_dropdown, tone_dropdown, min_rating, sort_dropdown, max_results, author_input, year_min, year_max],
         outputs=[summary_output, cards_output],
+    )
+
+    show_saved_btn.click(
+        fn=get_saved_books,
+        inputs=[],
+        outputs=[saved_output],
     )
 
 
