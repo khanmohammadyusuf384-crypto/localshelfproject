@@ -3,6 +3,10 @@ import re
 
 import gradio as gr
 import numpy as np
+# Ranking weights
+W_SEMANTICS = 0.7
+W_KEYWORD = 0.2
+W_MODIFIER = 0.1
 import pandas as pd
 from langchain_chroma import Chroma
 
@@ -234,6 +238,10 @@ def rerank_with_composite_score(
         return max(0.0, 1.0 - (rank / total))
 
     reranked["semantic_score"] = reranked["isbn13"].map(semantic_score_for).astype(float)
+    # Penalize weak semantic matches
+    reranked["semantic_score"] = reranked["semantic_score"].apply(
+        lambda x: x * if x >= 0.2 else x * 0.5
+    )
 
     query_terms = [str(term).lower() for term in query_keywords if str(term).strip()]
 
@@ -248,7 +256,8 @@ def rerank_with_composite_score(
         description_matches = sum(1 for term in query_terms if term in description_text)
 
         # Title matches are stronger than description matches by design.
-        return (title_matches * 0.35) + (description_matches * 0.12)
+        raw_score = (title_matches * 0.35) + (description_matches * 0.12)
+        return min(raw_score, 1.0)
 
     def modifier_boost_for(row: pd.Series) -> float:
         if not query_modifiers:
@@ -268,15 +277,18 @@ def rerank_with_composite_score(
             # smaller weight than keyword boost (important)
             boost += matches * 0.08
 
-        return boost
+        return min(boost, 1.0)
 
     reranked["keyword_boost"] = reranked.apply(keyword_boost_for, axis=1)
     reranked["modifier_boost"] = reranked.apply(modifier_boost_for, axis=1)
     reranked["final_score"] = (
-    reranked["semantic_score"]
-    + reranked["keyword_boost"]
-    + reranked["modifier_boost"]
-)
+        W_SEMANTIC * reranked["semantic_score"]
+        + W_KEYWORD * reranked["keyword_boost"]
+        + W_MODIFIER * reranked["modifier_boost"]
+    )
+    reranked["rating_boost"] = reranked["average_rating"] / 5.0
+
+    reranked["final_score"] += 0.5 * reranked["rating_boost"]
 
     return reranked.sort_values(
         by=["final_score", "average_rating", "ratings_count"],
