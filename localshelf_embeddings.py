@@ -20,14 +20,15 @@ class LocalSentenceTransformerEmbeddings:
         # so setup stays self-contained instead of relying on global user folders.
         os.environ.setdefault("HF_HOME", str(LOCAL_CACHE_DIR))
         os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", str(LOCAL_CACHE_DIR))
-        # Offline flags make app startup fail fast if the model is missing locally
-        # instead of silently trying to reach the network at runtime.
+        # Offline flags make app startup prefer local model files. Deployment
+        # configs can set these to "0" to allow the first build to download.
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
         os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        local_files_only = os.environ.get("HF_HUB_OFFLINE") != "0"
         self._model = SentenceTransformer(
             model_name,
             cache_folder=str(LOCAL_CACHE_DIR),
-            local_files_only=True,
+            local_files_only=local_files_only,
         )
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
