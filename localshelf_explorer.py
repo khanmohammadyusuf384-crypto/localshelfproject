@@ -1,5 +1,7 @@
 from pathlib import Path
+import json
 import re
+from datetime import datetime, timezone
 
 import gradio as gr
 import numpy as np
@@ -18,6 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent
 BOOKS_WITH_EMOTIONS_PATH = BASE_DIR / "books_with_emotions.csv"
 TAGGED_DESCRIPTION_PATH = BASE_DIR / "tagged_description.txt"
 CHROMA_DIR = BASE_DIR / "chroma_db"
+FAVORITES_PATH = BASE_DIR / "saved_books.json"
 FALLBACK_COVER = "cover-not-found.jpg"
 
 
@@ -38,10 +41,38 @@ def require_project_data() -> None:
         )
 
 
+def load_saved_books() -> set[int]:
+    """Load persisted favorites from disk."""
+    if not FAVORITES_PATH.exists():
+        return set()
+
+    try:
+        data = json.loads(FAVORITES_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return set()
+
+    values = data.get("saved_isbns", data if isinstance(data, list) else [])
+    saved: set[int] = set()
+    for value in values:
+        try:
+            saved.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    return saved
+
+
+def persist_saved_books(saved: set[int]) -> None:
+    """Write favorites to a small local JSON file."""
+    payload = {
+        "saved_isbns": sorted(saved),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    FAVORITES_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
 require_project_data()
 
 books = pd.read_csv(BOOKS_WITH_EMOTIONS_PATH)
-saved_books = set()
+saved_books = load_saved_books()
 # Remote thumbnails from the source dataset can be small, so we request a larger
 # variant when a cover URL exists and fall back to a local placeholder otherwise.
 books["large_thumbnail"] = books["thumbnail"].fillna("") + "&fife=w800"
@@ -449,6 +480,7 @@ def recommend_books(
 
 def save_book(isbn: int):
     saved_books.add(isbn)
+    persist_saved_books(saved_books)
     return f"Saved book {isbn}"
 
 def get_saved_books():
