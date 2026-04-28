@@ -271,7 +271,7 @@ def rerank_with_composite_score(
     reranked["semantic_score"] = reranked["isbn13"].map(semantic_score_for).astype(float)
     # Penalize weak semantic matches
     reranked["semantic_score"] = reranked["semantic_score"].apply(
-        lambda x: x * if x >= 0.2 else x * 0.5
+        lambda x: x if x >= 0.2 else x * 0.5
     )
 
     query_terms = [str(term).lower() for term in query_keywords if str(term).strip()]
@@ -313,7 +313,7 @@ def rerank_with_composite_score(
     reranked["keyword_boost"] = reranked.apply(keyword_boost_for, axis=1)
     reranked["modifier_boost"] = reranked.apply(modifier_boost_for, axis=1)
     reranked["final_score"] = (
-        W_SEMANTIC * reranked["semantic_score"]
+        W_SEMANTICS * reranked["semantic_score"]
         + W_KEYWORD * reranked["keyword_boost"]
         + W_MODIFIER * reranked["modifier_boost"]
     )
@@ -476,7 +476,8 @@ def recommend_books(
     )
     summary = build_summary(recommendations, mode, category, tone, sort_by, min_rating, author, year_min, year_max)
     cards = build_book_cards(recommendations)
-    return summary, cards
+    book_options = build_book_options(recommendations)
+    return summary, cards, gr.update(choices=book_options, value=None)
 
 def save_book(isbn: int):
     saved_books.add(isbn)
@@ -489,6 +490,37 @@ def get_saved_books():
 
     saved_df = books[books["isbn13"].isin(saved_books)]
     return build_book_cards(saved_df)
+
+
+def build_book_options(recommendations: pd.DataFrame) -> list[str]:
+    """Build dropdown choices for saving or removing visible results."""
+    options = []
+    for _, row in recommendations.iterrows():
+        title = row.get("title_and_subtitle") or row.get("title") or "Untitled"
+        isbn = int(row.get("isbn13", 0))
+        options.append(f"{title} | ISBN {isbn}")
+    return options
+
+
+def extract_isbn_from_option(book_option: str) -> int | None:
+    match = re.search(r"ISBN (\d+)", str(book_option))
+    return int(match.group(1)) if match else None
+
+
+def save_book_from_option(book_option: str):
+    isbn = extract_isbn_from_option(book_option)
+    if isbn is None:
+        return "Choose a result to save."
+    return save_book(isbn)
+
+
+def remove_book_from_option(book_option: str):
+    isbn = extract_isbn_from_option(book_option)
+    if isbn is None:
+        return "Choose a saved result to remove."
+    saved_books.discard(isbn)
+    persist_saved_books(saved_books)
+    return f"Removed book {isbn}"
 
 # These lists are built once from the dataset and then reused by the Gradio widgets.
 categories = ["All"] + sorted(books["simple_categories"].fillna("Uncategorized").unique())
@@ -546,6 +578,12 @@ with gr.Blocks() as dashboard:
 
     show_saved_btn = gr.Button("Show Saved Books")
 
+    with gr.Row():
+        selected_book_dropdown = gr.Dropdown(choices=[], label="Result to save or remove")
+        save_selected_btn = gr.Button("Save selected", variant="primary")
+        remove_selected_btn = gr.Button("Remove selected")
+
+    save_status = gr.Markdown()
     summary_output = gr.Markdown()
     cards_output = gr.HTML()
     saved_output = gr.HTML()
@@ -555,7 +593,19 @@ with gr.Blocks() as dashboard:
         # as the `inputs=[...]` list, then sends the returned values to `outputs=[...]`.
         fn=recommend_books,
         inputs=[user_query, category_dropdown, tone_dropdown, min_rating, sort_dropdown, max_results, author_input, year_min, year_max],
-        outputs=[summary_output, cards_output],
+        outputs=[summary_output, cards_output, selected_book_dropdown],
+    )
+
+    save_selected_btn.click(
+        fn=save_book_from_option,
+        inputs=[selected_book_dropdown],
+        outputs=[save_status],
+    )
+
+    remove_selected_btn.click(
+        fn=remove_book_from_option,
+        inputs=[selected_book_dropdown],
+        outputs=[save_status],
     )
 
     show_saved_btn.click(
