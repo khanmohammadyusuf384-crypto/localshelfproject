@@ -185,6 +185,46 @@ def extract_isbn_from_page_content(page_content: str) -> int | None:
     except (TypeError, ValueError):
         return None
 
+def text_for_explanation(row: pd.Series) -> str:
+    return (
+        str(row.get("title_and_subtitle") or row.get("title") or "")
+        + " "
+        + str(row.get("description") or "")
+    ).lower()
+
+
+def mood_signal_for(row: pd.Series, tone: str) -> float:
+    mood_columns = {
+        "Happy": "joy",
+        "Surprising": "surprise",
+        "Angry": "anger",
+        "Suspenseful": "fear",
+        "Sad": "sadness",
+    }
+    column = mood_columns.get(tone)
+    return float(row.get(column, 0.0) or 0.0) if column else 0.0
+
+
+def build_recommendation_explanation(row: pd.Series, query_terms: list[str], query_modifiers: list[str], tone: str) -> str:
+    reasons = []
+    semantic_score = float(row.get("semantic_score", 0.0) or 0.0)
+    keyword_score = float(row.get("keyword_boost", 0.0) or 0.0)
+    modifier_score = float(row.get("modifier_boost", 0.0) or 0.0)
+    mood_score = mood_signal_for(row, tone)
+
+    if semantic_score:
+        reasons.append(f"semantic match {semantic_score:.2f}")
+    if keyword_score:
+        matched_terms = [term for term in query_terms if term in text_for_explanation(row)]
+        reasons.append("keyword match" if not matched_terms else f"keyword match on {', '.join(matched_terms[:3])}")
+    if modifier_score and query_modifiers:
+        reasons.append(f"style match for {', '.join(query_modifiers[:3])}")
+    if tone != "All" and mood_score:
+        reasons.append(f"{tone.lower()} mood score {mood_score:.2f}")
+    if float(row.get("average_rating", 0.0) or 0.0) >= 4.0:
+        reasons.append(f"strong reader rating {float(row['average_rating']):.2f}")
+
+    return "; ".join(reasons) if reasons else "browse result from your local catalog"
 
 def apply_filters(
     book_recs: pd.DataFrame,
@@ -243,6 +283,7 @@ def rerank_with_composite_score(
     ordered_isbns: list[int],
     query_keywords: list[str],
     query_modifiers: list[str],
+    tone: str,
 ) -> pd.DataFrame:
     """Blend semantic rank with simple keyword boosts and sort by final score."""
     reranked = book_recs.copy()
@@ -257,6 +298,7 @@ def rerank_with_composite_score(
         reranked["semantic_score"] = []
         reranked["keyword_boost"] = []
         reranked["final_score"] = []
+        reranked["explanation"] = []
         return reranked
 
     # We do not receive raw vector distances from `similarity_search`, so we
@@ -320,6 +362,10 @@ def rerank_with_composite_score(
     reranked["rating_boost"] = reranked["average_rating"] / 5.0
 
     reranked["final_score"] += 0.5 * reranked["rating_boost"]
+    reranked["explanation"] = reranked.apply(
+        lambda row: build_recommendation_explanation(row, query_terms, query_modifiers, tone),
+        axis=1,
+    )
 
     return reranked.sort_values(
         by=["final_score", "average_rating", "ratings_count"],
@@ -361,6 +407,7 @@ def retrieve_recommendations(
             ordered_isbns=ordered_isbns,
             query_keywords=parsed_query["keywords"],
             query_modifiers=parsed_query["modifiers"],
+            tone=tone,
         )
         mode = (
             f"Semantic match for: `{query}` "
@@ -369,6 +416,7 @@ def retrieve_recommendations(
  
     else:
         book_recs = books.copy()
+        book_recs["explanation"] = "browse result from your local catalog"
         mode = "Browse mode: no query provided, showing books from your local catalog"
 
     filtered = apply_filters(book_recs, category, tone, min_rating, sort_by, author, year_min, year_max)
@@ -421,6 +469,7 @@ def build_book_cards(recommendations: pd.DataFrame) -> str:
         pages = int(row.get("num_pages", 0))
         year_text = str(year) if year > 0 else "Unknown year"
         pages_text = f"{pages} pages" if pages > 0 else "Page count unknown"
+        explanation = row.get("explanation", "browse result from your local catalog")
 
         # Gradio HTML output gives us more control over the card layout than a
         # simple dataframe or gallery component for this browse-style UI.
@@ -432,6 +481,7 @@ def build_book_cards(recommendations: pd.DataFrame) -> str:
                     <div style="font-size:1.05rem; font-weight:700; color:#23313f;">{title}</div>
                     <div style="margin-top:4px; color:#4e5b66;">by {authors}</div>
                     <div style="margin-top:10px; font-size:0.92rem; color:#31414d;">{description}</div>
+                    <div style="margin-top:8px; font-size:0.86rem; color:#2f6f6d; font-weight:600;">Why: {explanation}</div>
                     <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; font-size:0.85rem;">
                         <span style="background:#e8f1eb; padding:4px 10px; border-radius:999px;">{category}</span>
                         <span style="background:#edf1f7; padding:4px 10px; border-radius:999px;">Rating {rating:.2f}</span>
