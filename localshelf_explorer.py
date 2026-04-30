@@ -22,6 +22,13 @@ TAGGED_DESCRIPTION_PATH = BASE_DIR / "tagged_description.txt"
 CHROMA_DIR = BASE_DIR / "chroma_db"
 FAVORITES_PATH = BASE_DIR / "saved_books.json"
 FALLBACK_COVER = "cover-not-found.jpg"
+RANKING_PROFILES = {
+    "Balanced": {"semantic": 0.55, "keyword": 0.18, "mood": 0.12, "rating": 0.15},
+    "Semantic Heavy": {"semantic": 0.72, "keyword": 0.10, "mood": 0.08, "rating": 0.10},
+    "Keyword Heavy": {"semantic": 0.42, "keyword": 0.34, "mood": 0.09, "rating": 0.15},
+    "Mood Heavy": {"semantic": 0.45, "keyword": 0.12, "mood": 0.28, "rating": 0.15},
+    "Popularity Heavy": {"semantic": 0.45, "keyword": 0.13, "mood": 0.07, "rating": 0.35},
+}
 
 
 def require_project_data() -> None:
@@ -284,9 +291,11 @@ def rerank_with_composite_score(
     query_keywords: list[str],
     query_modifiers: list[str],
     tone: str,
+    ranking_profile: str,
 ) -> pd.DataFrame:
     """Blend semantic rank with simple keyword boosts and sort by final score."""
     reranked = book_recs.copy()
+    weights = RANKING_PROFILES.get(ranking_profile, RANKING_PROFILES["Balanced"])
     modifier_map = {
         "sad": ["tragic", "grief", "loss", "dark"],
         "hopeful": ["uplifting", "inspiring", "positive"],
@@ -354,14 +363,14 @@ def rerank_with_composite_score(
 
     reranked["keyword_boost"] = reranked.apply(keyword_boost_for, axis=1)
     reranked["modifier_boost"] = reranked.apply(modifier_boost_for, axis=1)
+    reranked["mood_score"] = reranked.apply(lambda row: mood_signal_for(row, tone), axis=1)
+    reranked["rating_boost"] = (reranked["average_rating"] / 5.0).clip(0, 1)
     reranked["final_score"] = (
-        W_SEMANTICS * reranked["semantic_score"]
-        + W_KEYWORD * reranked["keyword_boost"]
-        + W_MODIFIER * reranked["modifier_boost"]
+        weights["semantic"] * reranked["semantic_score"]
+        + weights["keyword"] * reranked["keyword_boost"]
+        + weights["mood"] * np.maximum(reranked["mood_score"], reranked["modifier_boost"])
+        + weights["rating"] * reranked["rating_boost"]
     )
-    reranked["rating_boost"] = reranked["average_rating"] / 5.0
-
-    reranked["final_score"] += 0.5 * reranked["rating_boost"]
     reranked["explanation"] = reranked.apply(
         lambda row: build_recommendation_explanation(row, query_terms, query_modifiers, tone),
         axis=1,
@@ -383,7 +392,8 @@ def retrieve_recommendations(
     author: str,
     year_min: int,
     year_max: int,
-) -> tuple[pd.DataFrame, str]:
+    ranking_profile: str,
+) -> tuple[pd.DataFrame, str, dict[str, float]]:
     """Get book recommendations from semantic search or browse mode."""
     # This return type means: the function gives back `(dataframe, message_text)`.
     query = preprocess_query(query)
@@ -408,6 +418,7 @@ def retrieve_recommendations(
             query_keywords=parsed_query["keywords"],
             query_modifiers=parsed_query["modifiers"],
             tone=tone,
+            ranking_profile=ranking_profile,
         )
         mode = (
             f"Semantic match for: `{query}` "
@@ -416,12 +427,59 @@ def retrieve_recommendations(
  
     else:
         book_recs = books.copy()
+        book_recs["semantic_score"] = 0.0
+        book_recs["keyword_boost"] = 0.0
+        book_recs["modifier_boost"] = 0.0
+        book_recs["mood_score"] = book_recs.apply(lambda row: mood_signal_for(row, tone), axis=1)
+        book_recs["rating_boost"] = (book_recs["average_rating"] / 5.0).clip(0, 1)
+        book_recs["final_score"] = book_recs["rating_boost"] + (0.15 * book_recs["mood_score"])
         book_recs["explanation"] = "browse result from your local catalog"
         mode = "Browse mode: no query provided, showing books from your local catalog"
 
     filtered = apply_filters(book_recs, category, tone, min_rating, sort_by, author, year_min, year_max)
-    return filtered.head(max_results), mode
+    filtered = filtered.head(max_results).copy()
+    metrics = evaluate_ranking(filtered, parsed_query["keywords"], tone, ranking_profile)
+    return filtered, mode, metrics
 
+def evaluate_ranking(recommendations: pd.DataFrame, query_keywords: list[str], tone: str, ranking_profile: str) -> dict[str, float]:
+    if recommendations.empty:
+        return {
+            "coverage": 0.0,
+            "avg_score": 0.0,
+            "keyword_hit_rate": 0.0,
+            "mood_alignment": 0.0,
+            "avg_rating": 0.0,
+        }
+
+    if query_keywords:
+        keyword_hits = recommendations.apply(
+            lambda row: any(term in text_for_explanation(row) for term in query_keywords),
+            axis=1,
+        )
+        keyword_hit_rate = float(keyword_hits.mean())
+    else:
+        keyword_hit_rate = 0.0
+
+    mood_alignment = float(recommendations["mood_score"].mean()) if tone != "All" else 0.0
+    return {
+        "coverage": float(len(recommendations)),
+        "avg_score": float(recommendations["final_score"].mean()),
+        "keyword_hit_rate": keyword_hit_rate,
+        "mood_alignment": mood_alignment,
+        "avg_rating": float(recommendations["average_rating"].mean()),
+    }
+
+
+def build_metrics_markdown(metrics: dict[str, float], ranking_profile: str) -> str:
+    return (
+        "### Ranking evaluation\n"
+        f"- Profile: {ranking_profile}\n"
+        f"- Results evaluated: {metrics['coverage']:.0f}\n"
+        f"- Average score: {metrics['avg_score']:.3f}\n"
+        f"- Keyword hit rate: {metrics['keyword_hit_rate']:.0%}\n"
+        f"- Mood alignment: {metrics['mood_alignment']:.3f}\n"
+        f"- Average rating: {metrics['avg_rating']:.2f}\n"
+    )
 
 def build_summary(recommendations: pd.DataFrame, mode: str, category: str, tone: str, sort_by: str, min_rating: float, author: str, year_min: int, year_max: int) -> str:
     """Build the markdown summary shown above the result cards."""
@@ -509,11 +567,12 @@ def recommend_books(
     author: str,
     year_min: int,
     year_max: int,
+    ranking_profile: str,
 ):
     """Main callback used by the Explore button in the UI."""
     if year_min > year_max:
         year_min, year_max = year_max, year_min   
-    recommendations, mode = retrieve_recommendations(
+    recommendations, mode, metrics = retrieve_recommendations(
         query=query,
         category=category,
         tone=tone,
@@ -523,11 +582,13 @@ def recommend_books(
         author=author,
         year_min=year_min,
         year_max=year_max,
+        ranking_profile=ranking_profile,
     )
     summary = build_summary(recommendations, mode, category, tone, sort_by, min_rating, author, year_min, year_max)
     cards = build_book_cards(recommendations)
     book_options = build_book_options(recommendations)
-    return summary, cards, gr.update(choices=book_options, value=None)
+    metrics_markdown = build_metrics_markdown(metrics, ranking_profile)
+    return summary, cards, gr.update(choices=book_options, value=None), metrics_markdown
 
 def save_book(isbn: int):
     saved_books.add(isbn)
@@ -623,6 +684,7 @@ with gr.Blocks() as dashboard:
 
     with gr.Row():
         sort_dropdown = gr.Dropdown(choices=sort_modes, label="Sort results", value="Semantic Match")
+        ranking_profile = gr.Dropdown(choices=list(RANKING_PROFILES), label="Ranking profile", value="Balanced")
         max_results = gr.Slider(minimum=4, maximum=20, value=8, step=2, label="How many books to show")
         submit_button = gr.Button("Explore books", variant="primary")
 
@@ -637,13 +699,14 @@ with gr.Blocks() as dashboard:
     summary_output = gr.Markdown()
     cards_output = gr.HTML()
     saved_output = gr.HTML()
+    metrics_output = gr.Markdown()
 
     submit_button.click(
         # Gradio calls this function with the widget values in the same order
         # as the `inputs=[...]` list, then sends the returned values to `outputs=[...]`.
         fn=recommend_books,
-        inputs=[user_query, category_dropdown, tone_dropdown, min_rating, sort_dropdown, max_results, author_input, year_min, year_max],
-        outputs=[summary_output, cards_output, selected_book_dropdown],
+        inputs=[user_query, category_dropdown, tone_dropdown, min_rating, sort_dropdown, max_results, author_input, year_min, year_max, ranking_profile],
+        outputs=[summary_output, cards_output, selected_book_dropdown, metrics_output],
     )
 
     save_selected_btn.click(
