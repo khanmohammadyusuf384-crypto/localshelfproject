@@ -28,6 +28,10 @@ The Gradio app is shaped as a browsing tool. It includes:
 * minimum-rating filtering
 * multiple sort modes
 * card-style recommendations with metadata summaries
+* persistent saved books stored in local JSON
+* recommendation explanations for semantic, keyword, mood, and rating signals
+* ranking profiles and lightweight evaluation metrics for tuning
+* conversational search that rewrites recent chat context into book-search queries
 
 ## Tech stack
 
@@ -50,6 +54,10 @@ Core files:
   Prepares the local dataset, emotion scores, tagged descriptions, and vector store.
 * `localshelf_embeddings.py`  
   Loads the local embedding model in offline-friendly mode.
+* `prepare_deploy.py`  
+  Builds the Chroma vector store for cloud deployment without re-running the full catalog pipeline.
+* `app.py`  
+  Deployment entry point for Hugging Face Spaces, Render, and Railway.
 
 Generated local assets:
 
@@ -105,6 +113,7 @@ After the required model files have been downloaded and cached once, the core re
 * local vector database access
 * local filtering and ranking
 * local Gradio app on `127.0.0.1`
+* persistent favorites in `saved_books.json`
 
 Current limitation:
 
@@ -115,27 +124,42 @@ Current limitation:
 The dashboard supports:
 
 * natural-language semantic search
+* conversational search with recent-chat context
 * blank-query browsing mode
 * shelf filtering by simplified categories
 * mood filtering using local emotion scores
 * minimum-rating filtering
-* result sorting by semantic match, rating, recency, or shorter reads
+* result sorting by semantic match, rating, recency, shorter reads, or saved-first
+* ranking profiles for balanced, semantic-heavy, keyword-heavy, mood-heavy, and popularity-heavy results
+* local saved-books management
 
 Each result card shows:
 
 * title
 * author list
 * short description preview
+* why the result was recommended
 * category
 * average rating
 * publication year
 * page count
 
+## Ranking and Evaluation
+
+LocalShelf uses a composite score that blends semantic retrieval order, keyword matches, mood alignment, and reader rating. The Ranking Lab tab reports lightweight metrics such as result coverage, average final score, keyword hit rate, mood alignment, and saved-result rate.
+
+Save and remove events are written to `ranking_interactions.jsonl`. This creates a simple event log that can later support learned ranking, offline evaluation, or A/B testing of ranking profiles.
+
+## Favorites
+
+Saved books are stored in `saved_books.json` and survive app restarts. Select a row in the results table, then use Save selected or Remove selected. The Favorites tab shows the current reading list.
+
 ## Notes
 
 * `build_localshelf_catalog.py` reuses `books_cleaned.csv` if it already exists.
 * The local embedding loader is configured to prefer cached files and offline startup.
-* If you delete `.hf-cache/` or `chroma_db/`, those resources will need to be rebuilt.
+* If you delete `.hf-cache/` or `chroma_db/`, run `python prepare_deploy.py` or `python build_localshelf_catalog.py` to rebuild the vector store.
+* `.hf-cache/`, `chroma_db/`, `saved_books.json`, and `ranking_interactions.jsonl` are local runtime files and are ignored by Git.
 
 ## Portfolio value
 
@@ -147,9 +171,7 @@ LocalShelf Explorer demonstrates practical skills in data preparation, semantic 
 Some natural next steps for this project:
 
 * download cover images locally for a more complete offline experience
-* add bookmarking or reading-list support
-* add author or publication-year filters
-* surface similarity scores in the UI
 * package the app into a cleaner desktop-friendly launcher
-* evaluate recommendation quality with sample queries and expected results
+* replace heuristic ranking with a learned ranker trained from saved-book interactions
+* run live A/B tests between ranking profiles after deployment
 
