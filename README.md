@@ -9,6 +9,20 @@ This project is a small but practical example of local AI applied to a real user
 The same pattern can be extended beyond books to other discovery workflows such as ecommerce catalogs, learning resources, internal knowledge bases, or media recommendation systems.
 
 
+## Demo / Architecture
+
+![LocalShelf Explorer demo](assets/localshelf-readme.png)
+
+LocalShelf combines a local data-preparation pipeline with a Gradio discovery interface:
+
+* Cleaned book metadata is enriched with categories, descriptions, ratings, and emotion scores.
+* Sentence Transformers converts natural-language queries and book descriptions into local embeddings.
+* Chroma stores the vector index and returns semantically similar books for each search.
+* A ranking layer blends semantic match, keyword match, mood alignment, and reader rating.
+* The UI shows recommendation explanations, saved books, ranking metrics, and conversational search.
+* Local JSON files persist favorites and interaction events for future learned-ranking experiments.
+
+
 ## Key features
 
 This project is centered around a local workflow.
