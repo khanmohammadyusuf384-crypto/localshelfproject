@@ -725,10 +725,24 @@ def chat_recommend(
     year_min: int,
     year_max: int,
     ranking_profile: str,
-) -> tuple[list[dict[str, str]], str, str, pd.DataFrame, list[dict[str, Any]], str, str, int | None]:
+) -> tuple[
+    list[dict[str, str]],
+    str,
+    str,
+    str,
+    pd.DataFrame,
+    list[dict[str, Any]],
+    str,
+    str,
+    int | None,
+    str,
+    pd.DataFrame,
+    str,
+]:
     history = history or []
     if not message.strip():
-        return history, "", "", build_table(pd.DataFrame()), [], "", "Send a search message first.", None
+        empty_table = build_table(pd.DataFrame())
+        return history, "", "", "", empty_table, [], "", "Send a search message first.", None, "", empty_table, ""
 
     new_history = history + [{"role": "user", "content": message}]
     summary, cards, table, records, metrics, selection, selected = recommend_books(
@@ -746,7 +760,7 @@ def chat_recommend(
     )
     response = "I searched the catalog and ranked the strongest matches below."
     new_history = new_history + [{"role": "assistant", "content": response}]
-    return new_history, "", summary, cards, table, records, metrics, selection, selected
+    return new_history, "", summary, cards, table, records, metrics, selection, selected, summary, table, cards
 
 
 categories = ["All"] + sorted(books["simple_categories"].fillna("Uncategorized").unique())
@@ -862,6 +876,15 @@ with gr.Blocks(title="LocalShelf Explorer") as dashboard:
         chatbot = gr.Chatbot(label="Book search chat")
         chat_input = gr.Textbox(label="Message", placeholder="I want something like a cozy mystery but not too dark")
         chat_button = gr.Button("Search from conversation", variant="primary")
+        chat_summary_output = gr.Markdown()
+        chat_result_table = gr.Dataframe(
+            headers=["Saved", "Title", "Authors", "Rating", "Year", "Shelf", "Score", "ISBN", "Why"],
+            datatype=["str", "str", "str", "number", "number", "str", "number", "number", "str"],
+            interactive=False,
+            wrap=True,
+            label="Conversation results",
+        )
+        chat_cards_output = gr.HTML()
 
     with gr.Tab("Ranking lab"):
         metrics_output = gr.Markdown()
@@ -935,6 +958,9 @@ with gr.Blocks(title="LocalShelf Explorer") as dashboard:
             metrics_output,
             selection_status,
             selected_isbn,
+            chat_summary_output,
+            chat_result_table,
+            chat_cards_output,
         ],
     )
 
